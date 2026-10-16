@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from stralis.config import Config
 from stralis.db.engine import init_db, make_engine, make_session_factory
@@ -40,6 +41,18 @@ def create_app(config: Config | None = None, repo: Repo | None = None) -> FastAP
         yield
 
     app = FastAPI(title="Stralis", version="0.1.0", lifespan=lifespan)
+
+    # Browser clients (the Flutter web UI) are served from a different origin,
+    # so opt-in CORS is required. Default is open; tighten with
+    # STRALIS_CORS_ORIGINS=https://ui.example.com,...
+    origins = [o.strip() for o in resolved_config.cors_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins or ["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     def get_repo(request: Request) -> Repo:
         return request.app.state.repo

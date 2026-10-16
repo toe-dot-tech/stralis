@@ -40,6 +40,8 @@ class Config:
 
     # Misc
     log_level: str = "INFO"
+    # Comma-separated allowed browser origins for the API ("*" = any).
+    cors_origins: str = "*"
 
     @classmethod
     def from_env(cls) -> "Config":

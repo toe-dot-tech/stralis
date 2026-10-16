@@ -103,3 +103,39 @@ def test_retry_non_failed_job_409(tmp_path):
     with _app(tmp_path) as c:
         job_id = c.post("/api/v1/pipelines", json=DIAMOND).json()["job_id"]
         assert c.post(f"/api/v1/jobs/{job_id}/retry").status_code == 409
+
+
+def test_job_detail_includes_spec(tmp_path):
+    """The UI graph is spec-driven, so job detail must carry the full spec."""
+    with _app(tmp_path) as c:
+        job_id = c.post("/api/v1/pipelines", json=DIAMOND).json()["job_id"]
+        spec = c.get(f"/api/v1/jobs/{job_id}").json()["job"]["spec"]
+        assert [n["id"] for n in spec["nodes"]] == ["a", "b", "c", "d"]
+        assert spec["nodes"][1]["depends_on"] == ["a"]
+
+
+def test_cors_preflight_allows_browser_origin(tmp_path):
+    """Flutter web runs on a different origin, so preflight must succeed."""
+    with _app(tmp_path) as c:
+        r = c.options(
+            "/api/v1/pipelines",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert r.status_code == 200
+        assert r.headers["access-control-allow-origin"] == "*"
+
+
+def test_cors_origins_are_configurable(tmp_path):
+    from stralis.config import Config
+
+    engine = make_engine(f"sqlite:///{tmp_path}/cors.db")
+    init_db(engine)
+    repo = Repo(make_session_factory(engine))
+    cfg = Config(cors_origins="https://ui.example.com,https://admin.example.com")
+    with TestClient(create_app(config=cfg, repo=repo)) as c:
+        r = c.get("/healthz", headers={"Origin": "https://ui.example.com"})
+        assert r.status_code == 200
+        assert r.headers["access-control-allow-origin"] == "https://ui.example.com"

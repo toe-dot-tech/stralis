@@ -13,6 +13,8 @@ class Job extends Equatable {
   final DateTime createdAt;
   @JsonKey(name: 'updated_at')
   final DateTime updatedAt;
+  /// The compiled PipelineSpec as submitted (nodes + depends_on edges).
+  final Map<String, dynamic>? spec;
 
   const Job({
     required this.id,
@@ -21,13 +23,14 @@ class Job extends Equatable {
     this.error,
     required this.createdAt,
     required this.updatedAt,
+    this.spec,
   });
 
   factory Job.fromJson(Map<String, dynamic> json) => _$JobFromJson(json);
   Map<String, dynamic> toJson() => _$JobToJson(this);
 
   @override
-  List<Object?> get props => [id, name, status, error, createdAt, updatedAt];
+  List<Object?> get props => [id, name, status, error, createdAt, updatedAt, spec];
 }
 
 @JsonSerializable()

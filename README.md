@@ -76,6 +76,29 @@ Stralis answers with three mechanisms:
   run the handler, upload outputs, and mark the node terminal.
 - **Postgres/SQLite** remains authoritative at every step; Redis is only a hint.
 
+### Repository layout
+
+```text
+stralis/
+├── stralis/
+│   ├── models.py          # PipelineSpec / NodeSpec / JobRecord / NodeRunRecord (pydantic)
+│   ├── dag/compiler.py    # validation + deterministic Kahn topological order
+│   ├── db/                # SQLAlchemy ORM, engine, and the Repo (fencing, checkpoints, resume)
+│   ├── ports/             # TaskQueue + ObjectStore protocols (the seams)
+│   ├── queue/             # adapters: redis_streams.py, sqlite_queue.py
+│   ├── storage/           # adapters: s3.py, local.py
+│   ├── worker/            # worker loop + handlers (noop, shell, ffmpeg.transcode)
+│   ├── orchestrator/      # engine.py: sweep → promote → enqueue → recover (the only scheduler)
+│   ├── api/app.py         # FastAPI control plane
+│   ├── cli.py             # typer CLI (submit/status/list/retry/worker/orchestrator/serve)
+│   └── runtime.py         # backend selection from Config (redis|sqlite, s3|local)
+├── ui_flutter/            # Flutter (Dart) web/desktop client
+├── examples/              # demo_dag.json, video_transcode.json, audio_transcribe.json
+├── tests/                 # unit + local-mode integration; redis/s3 suites skip if unconfigured
+├── Dockerfile             # api/orchestrator/worker image (ffmpeg baked in)
+└── docker-compose.yml     # redis + minio + postgres + the three app roles
+```
+
 ### Benchmarks
 
 Representative figures from the case study (1 worker vs. the naive synchronous gateway), intended to
@@ -154,6 +177,30 @@ pytest
 
 Run the installed `stralis` console script (or `python -m stralis.cli`) and set
 `STRALIS_LOG_LEVEL=DEBUG` for verbose tracing.
+
+### Zero-services local mode
+
+If you have neither Redis nor MinIO (or just want the fastest possible inner loop), Stralis ships a
+self-contained mode that swaps **both** ports for in-tree implementations: a SQLite-backed `TaskQueue`
+and a filesystem `ObjectStore`. Nothing else is required — no broker, no object store, no Postgres.
+
+```powershell
+$env:STRALIS_DATABASE_URL = "sqlite:///./.demo/stralis.db"
+$env:STRALIS_QUEUE_BACKEND = "sqlite"
+$env:STRALIS_STORE_BACKEND = "local"
+$env:STRALIS_LOCAL_STORE_ROOT = "./.demo/objects"
+$env:STRALIS_WORK_ROOT = "./.demo/work"
+
+python -m stralis submit examples/demo_dag.json   # prints: job_id <uuid>
+python -m stralis status <uuid> --watch           # poll until terminal
+```
+
+Then run the full HTTP + orchestrator + worker stack in three terminals with the same environment:
+`uvicorn stralis.api.app:app`, `python -m stralis orchestrator`, `python -m stralis worker`.
+
+The backend selection is pure configuration resolved by `stralis.runtime`; the engine, repo and
+resilience guarantees are identical either way, which is exactly what the ports/adapters split buys.
+The CI suite exercises this mode end to end.
 
 ### Media toolkit layer
 
@@ -288,6 +335,33 @@ Installed as the `stralis` console script.
 `stralis serve` is equivalent to the compose command
 `uvicorn stralis.api.app:app --host 0.0.0.0 --port 8000`.
 
+## Web UI (Flutter)
+
+`ui_flutter/` is a Flutter (Dart) client — the same codebase targets web, desktop and mobile. It talks
+only to the public HTTP API, so it works against any Stralis deployment (including zero-services local
+mode).
+
+- **Dashboard** (`/`) — recent jobs with live status chips (auto-refreshes every 3s).
+- **Job detail** (`/jobs/:id`) — an interactive DAG (pan/zoom) whose nodes are colored by live
+  `NodeRun` status, plus the per-node run table. Polls while the job is non-terminal and stops at
+  `succeeded`/`failed`/`cancelled`.
+- **Pipeline editor** (`/editor`) — paste a `PipelineSpec` JSON and submit it.
+
+```bash
+cd ui_flutter
+flutter pub get
+dart run build_runner build --delete-conflicting-outputs   # generates *.g.dart models
+
+# Point the UI at your API (default: http://127.0.0.1:8100) and run it.
+flutter run -d chrome --dart-define=STRALIS_API_URL=http://127.0.0.1:8100
+```
+
+The API sends permissive CORS headers by default so browser-based development works out of the box;
+lock this down with `STRALIS_CORS_ORIGINS` before exposing the API publicly.
+
+State management is Riverpod; routing is `go_router`; the DAG is rendered with `graphview`
+(Buchheim–Walker tree layout) inside an `InteractiveViewer`.
+
 ## Configuration
 
 All configuration is read from `STRALIS_*` environment variables (see `.env.example`).
@@ -295,6 +369,9 @@ All configuration is read from `STRALIS_*` environment variables (see `.env.exam
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `STRALIS_DATABASE_URL` | `sqlite:///./stralis.db` | SQLAlchemy DSN. Use `postgresql+psycopg://…` for Postgres (requires the `postgres` extra). |
+| `STRALIS_QUEUE_BACKEND` | `redis` | `redis` (Streams) or `sqlite` (in-tree, zero-services). |
+| `STRALIS_STORE_BACKEND` | `s3` | `s3` (S3/MinIO) or `local` (filesystem). |
+| `STRALIS_LOCAL_STORE_ROOT` | `./.stralis-store` | Root directory when `STRALIS_STORE_BACKEND=local`. |
 | `STRALIS_REDIS_URL` | `redis://localhost:6379/0` | Redis used for Streams. |
 | `STRALIS_QUEUE_GROUP` | `stralis-workers` | Redis consumer group name shared by workers. |
 | `STRALIS_S3_ENDPOINT_URL` | *(none)* | S3-compatible endpoint (e.g. `http://minio:9000`). Empty ⇒ AWS S3 default chain. |
@@ -308,6 +385,7 @@ All configuration is read from `STRALIS_*` environment variables (see `.env.exam
 | `STRALIS_MAX_ATTEMPTS` | `3` | Default per-node retry budget. |
 | `STRALIS_WORK_ROOT` | `./.stralis-work` | Worker scratch directory for claim-check downloads before handlers run. |
 | `STRALIS_LOG_LEVEL` | `INFO` | Python logging level. |
+| `STRALIS_CORS_ORIGINS` | `*` | Comma-separated browser origins allowed to call the API; set explicitly when exposing the UI. |
 
 ## Resilience model
 
@@ -332,5 +410,5 @@ All configuration is read from `STRALIS_*` environment variables (see `.env.exam
   orchestrators.
 - **No authentication.** The HTTP API is unauthenticated; put it behind a gateway/auth proxy for anything
   beyond a trusted network.
-- **No web UI yet.** Job inspection is via the HTTP API and CLI only; a dashboard is planned but not
-  shipped.
+- **UI is a thin client.** The Flutter app (`ui_flutter/`) covers job monitoring, DAG visualization and
+  submission; it is a v0 dashboard, not a full studio (no auth, no artifact preview/download yet).

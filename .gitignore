@@ -27,7 +27,11 @@ htmlcov/
 
 # Local Stralis runtime state
 stralis.db
+*.db-shm
+*.db-wal
 .stralis-work/
+.stralis-store/
+.demo/
 *.log
 
 # Secrets / local config
@@ -40,6 +44,12 @@ stralis.db
 *.swp
 .DS_Store
 Thumbs.db
+
+# Flutter / Dart (ui_flutter)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+ui_flutter/build/
 
 # Datastores (MinIO / Postgres volumes if ever bound into the repo tree)
 data/

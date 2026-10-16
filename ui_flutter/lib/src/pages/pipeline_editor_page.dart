@@ -12,13 +12,15 @@ class PipelineEditorPage extends ConsumerStatefulWidget {
 }
 
 class _PipelineEditorPageState extends ConsumerState<PipelineEditorPage> {
-  final _controller = TextEditingController(text: jsonEncode({
-    "name": "demo-diamond",
-    "nodes": [
-      {"id": "seed", "handler": "noop", "params": {"outputs": ["out"]}},
-      {"id": "down", "handler": "noop", "params": {}, "depends_on": ["seed"]}
-    ]
-  }, indent: 2));
+  final _controller = TextEditingController(
+    text: const JsonEncoder.withIndent('  ').convert({
+      "name": "demo-diamond",
+      "nodes": [
+        {"id": "seed", "handler": "noop", "params": {"outputs": ["out"]}},
+        {"id": "down", "handler": "noop", "params": {}, "depends_on": ["seed"]}
+      ]
+    }),
+  );
 
   bool _submitting = false;
   String? _error;
@@ -34,8 +36,8 @@ class _PipelineEditorPageState extends ConsumerState<PipelineEditorPage> {
     try {
       final spec = jsonDecode(_controller.text) as Map<String, dynamic>;
       await ref.read(apiProvider).submitPipeline(spec);
-      if (mounted) context.go('/');
       ref.invalidate(jobsProvider);
+      if (mounted) context.go('/');
     } catch (e) {
       setState(() { _error = e.toString(); });
     } finally {
