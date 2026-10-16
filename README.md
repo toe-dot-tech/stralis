@@ -3,7 +3,8 @@
 **Distributed media automation engine** — compiles multi-step pipelines into resilient, fault-tolerant DAGs.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](pyproject.toml)
+[![CI](https://github.com/toe-dot-tech/stralis/actions/workflows/ci.yml/badge.svg)](https://github.com/toe-dot-tech/stralis/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Submit a pipeline spec (JSON) to the API, get `202 Accepted` + a `job_id` immediately, and let a pool of
 workers grind through the DAG asynchronously. Media moves through an S3-compatible object store; only
@@ -221,6 +222,42 @@ is user-provided and not a Stralis dependency.
 
 `pyproject.toml` declares `requires-python = ">=3.11"`. The Dockerfile pins `python:3.12-slim` for broad
 availability; swap it for `python:3.14-slim` once GA images are used in your environment.
+
+## Testing & CI
+
+The suite is `pytest` (Python) plus `flutter test` (Dart UI). Locally:
+
+```bash
+pip install -e ".[dev]"
+
+pytest                                          # fast path; Redis/S3 suites skip if unconfigured
+pytest --cov=stralis --cov-report=term-missing  # coverage (config lives in pyproject.toml)
+```
+
+Two integration suites are opt-in — they skip unless pointed at real services:
+
+| Suite | Env vars that enable it |
+| --- | --- |
+| `tests/test_queue_redis.py` | `STRALIS_TEST_REDIS_URL` (e.g. `redis://localhost:6379/0`) |
+| `tests/test_storage_s3.py` | `STRALIS_TEST_S3_ENDPOINT_URL`, `STRALIS_TEST_S3_ACCESS_KEY`, `STRALIS_TEST_S3_SECRET_KEY` (optional `STRALIS_TEST_S3_BUCKET`, default `stralis-test`) |
+
+The S3 store provisions its bucket lazily on first write, so a bare MinIO is enough.
+
+The UI has its own suite:
+
+```bash
+cd ui_flutter
+flutter pub get
+flutter analyze
+flutter test
+```
+
+**CI** (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request:
+
+- **`pytest`** on Python 3.11 and 3.12 against a Redis service container and a MinIO
+  container, so the integration suites run instead of skipping; the coverage report is
+  uploaded as a build artifact.
+- **`flutter analyze` + `flutter test`** for `ui_flutter/`.
 
 ## Pipeline spec reference
 

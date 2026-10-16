@@ -41,3 +41,24 @@ addopts = "-q"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[tool.coverage.run]
+source = ["stralis"]
+branch = true
+omit = [
+    "stralis/__main__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "raise NotImplementedError",
+    "pragma: no cover",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
