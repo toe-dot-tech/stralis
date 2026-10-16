@@ -1,0 +1,37 @@
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Python build & test artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime state (never bake into an image)
+.env
+stralis.db
+.stralis-work/
+*.log
+
+# Editors / OS noise
+.idea/
+.vscode/
+.DS_Store
+
+# Deployment payloads that shouldn't be re-sent as build context
+docker-compose.yml
+examples/
+tests/
+docs/

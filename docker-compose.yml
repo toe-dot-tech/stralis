@@ -1,0 +1,121 @@
+# Stralis -- local development / single-host deployment stack.
+# Compose Spec (no top-level `version:` key).
+#
+#   docker compose up -d --build
+#
+# One image (./Dockerfile) backs three application roles:
+#   api           -- FastAPI gateway (uvicorn), submits jobs and reads state
+#   orchestrator  -- walks the DAG, promotes READY nodes onto Redis Streams
+#   worker        -- claims and executes nodes; scale with --scale worker=N
+#
+# State lives in Postgres (source of truth), media travels through MinIO
+# (claim-check), and ready nodes flow through Redis Streams.
+
+name: stralis
+
+# Shared environment for the three application roles (in-cluster DNS names).
+x-stralis-environment: &stralis-environment
+  STRALIS_DATABASE_URL: postgresql+psycopg://stralis:stralis@postgres:5432/stralis
+  STRALIS_REDIS_URL: redis://redis:6379/0
+  STRALIS_S3_ENDPOINT_URL: http://minio:9000
+  STRALIS_S3_BUCKET: stralis
+  STRALIS_S3_ACCESS_KEY: minio
+  STRALIS_S3_SECRET_KEY: minio123
+  STRALIS_WORK_ROOT: /data/work
+
+# Every app role waits for all three backends to be healthy before starting.
+x-stralis-depends-on: &stralis-depends-on
+  redis:
+    condition: service_healthy
+  postgres:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      # Mapped to the STRALIS_S3_* defaults above.
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stralis
+      POSTGRES_USER: stralis
+      POSTGRES_PASSWORD: stralis
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stralis -d stralis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: uvicorn stralis.api.app:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *stralis-environment
+    depends_on:
+      <<: *stralis-depends-on
+    restart: unless-stopped
+
+  orchestrator:
+    build: .
+    command: stralis orchestrator
+    environment:
+      <<: *stralis-environment
+    depends_on:
+      <<: *stralis-depends-on
+    restart: unless-stopped
+
+  # NOTE (ffmpeg): the base slim image does NOT ship ffmpeg, so `worker`
+  # containers cannot run the `ffmpeg.transcode` handler or any `shell` node
+  # that shells out to ffmpeg/ffprobe. The Dockerfile already bakes in an
+  # apt-get layer that installs ffmpeg:
+  #     apt-get update \
+  #       && apt-get install -y --no-install-recommends ffmpeg \
+  #       && rm -rf /var/lib/apt/lists/*
+  # Remove that layer to slim the image for pipelines that never touch ffmpeg.
+  worker:
+    build: .
+    command: stralis worker
+    environment:
+      <<: *stralis-environment
+    # Per-worker scratch for claim-check downloads. Each worker writes into
+    # job/node-scoped subdirectories, so a shared named volume is safe; use
+    # `--scale worker=N` for parallel execution.
+    volumes:
+      - work-data:/data/work
+    depends_on:
+      <<: *stralis-depends-on
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  pg-data:
+  work-data:

@@ -1,0 +1,77 @@
+{
+  "name": "demo-diamond",
+  "max_attempts": 3,
+  "metadata": {
+    "description": "Cross-platform 4-node diamond that needs no ffmpeg and no external media. seed -> {left, right} -> merge.",
+    "author": "stralis"
+  },
+  "nodes": [
+    {
+      "id": "seed",
+      "name": "Seed text",
+      "handler": "shell",
+      "params": {
+        "command": [
+          "python",
+          "-c",
+          "import sys; open(sys.argv[1], 'w', encoding='utf-8').write('stralis')",
+          "{output:text}"
+        ],
+        "outputs": ["text"],
+        "timeout": 60
+      }
+    },
+    {
+      "id": "left",
+      "name": "Uppercase branch",
+      "handler": "shell",
+      "params": {
+        "command": [
+          "python",
+          "-c",
+          "import sys; s = open(sys.argv[1], encoding='utf-8').read(); open(sys.argv[2], 'w', encoding='utf-8').write(s.upper())",
+          "{input:text}",
+          "{output:left}"
+        ],
+        "outputs": ["left"],
+        "timeout": 60
+      },
+      "depends_on": ["seed"]
+    },
+    {
+      "id": "right",
+      "name": "Suffix branch",
+      "handler": "shell",
+      "params": {
+        "command": [
+          "python",
+          "-c",
+          "import sys; s = open(sys.argv[1], encoding='utf-8').read(); open(sys.argv[2], 'w', encoding='utf-8').write(s + '-right')",
+          "{input:text}",
+          "{output:right}"
+        ],
+        "outputs": ["right"],
+        "timeout": 60
+      },
+      "depends_on": ["seed"]
+    },
+    {
+      "id": "merge",
+      "name": "Concatenate branches",
+      "handler": "shell",
+      "params": {
+        "command": [
+          "python",
+          "-c",
+          "import sys; a = open(sys.argv[1], encoding='utf-8').read(); b = open(sys.argv[2], encoding='utf-8').read(); open(sys.argv[3], 'w', encoding='utf-8').write(a + '|' + b)",
+          "{input:left}",
+          "{input:right}",
+          "{output:merged}"
+        ],
+        "outputs": ["merged"],
+        "timeout": 60
+      },
+      "depends_on": ["left", "right"]
+    }
+  ]
+}
